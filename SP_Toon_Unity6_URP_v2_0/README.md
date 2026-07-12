@@ -4,6 +4,7 @@
 <img width="1229" height="933" alt="スクリーンショット 2026-07-12 170248" src="https://github.com/user-attachments/assets/ce4edf7e-a3a5-4540-a338-345fd90ce6e2" />
 
 めんどくさい方は　SPToonURP.shader　と　SPToonURPShaderGUI.cs　をマテリアルと同じフォルダに入れれば認識します。
+
 Shaderを `DiGiMonkey/SP Toon URP` に変更して使用してください
 
 以下が正規の入れ方です

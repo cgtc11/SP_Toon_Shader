@@ -1,4 +1,4 @@
-SP Toon Shader for 3ds Max 2026 v7 - Fixed
+# SP Toon Shader for 3ds Max 2026 v7 - Fixed
 
 １．MAXのマテリアルエディタでOSLを検索して読み込み
 
@@ -8,9 +8,9 @@ SP Toon Shader for 3ds Max 2026 v7 - Fixed
 
 ３．ArnoldのStanderdSurfaceを読み込み
 
-４．OutColorとeMission_colorをつなぎます。
+４．OutColorとeMission_colorを繋ぐ
 
-５．BaseColorとSpecularの数値は0.0、Emissionは1.0にします。
+５．BaseColorとSpecularの数値は0.0、Emissionは1.0
 
 <img width="1482" height="905" alt="img_max2" src="https://github.com/user-attachments/assets/308072e7-926d-43e2-94b4-d59eea4c80fa" />
 
@@ -20,7 +20,7 @@ SP Toon Shader for 3ds Max 2026 v7 - Fixed
 
 <img width="1639" height="1011" alt="img_max3" src="https://github.com/user-attachments/assets/512dc5b0-a258-4f8e-90ad-836f35582fc2" />
 
-８．curvatureマップを割り当てるとInlineに反映します。
+８．curvatureマップを割り当てるとInlineに反映します
 
 <img width="1300" height="1008" alt="img_max4" src="https://github.com/user-attachments/assets/faefb39f-65a2-49ec-93c1-ac3da37d7367" />
 

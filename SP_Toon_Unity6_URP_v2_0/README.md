@@ -7,7 +7,7 @@
 Shaderを `DiGiMonkey/SP Toon URP` に変更して使用してください
 
 以下が正規の入れ方です
-ーーーーーーーー
+
 ## 対応環境
 
 - Unity 6

@@ -1,3 +1,11 @@
+
+<img width="1336" height="907" alt="img_max1" src="https://github.com/user-attachments/assets/662bb46d-c03b-46b2-addc-2007126fb245" />
+
+
+
+
+
+
 SP Toon Shader for 3ds Max 2026 v7 - Fixed
 Arnold OSL & Python Control UI
 

@@ -1,4 +1,4 @@
-SP Toon Shader for 3ds Max 2026 v1.1 - Fixed
+SP Toon Shader for 3ds Max 2026 v7 - Fixed
 Arnold OSL & Python Control UI
 
 Changelog:

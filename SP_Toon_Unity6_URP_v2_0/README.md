@@ -1,5 +1,4 @@
 # SP Toon Shader URP — Unity 6 v2.0
-ーーーーーーーー
 
 <img width="1229" height="933" alt="スクリーンショット 2026-07-12 170248" src="https://github.com/user-attachments/assets/ce4edf7e-a3a5-4540-a338-345fd90ce6e2" />
 

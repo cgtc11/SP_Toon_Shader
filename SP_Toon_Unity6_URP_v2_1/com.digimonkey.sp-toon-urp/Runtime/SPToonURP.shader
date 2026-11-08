@@ -1,4 +1,4 @@
-Shader "DiGiMonkey/SP Toon URP"
+﻿Shader "DiGiMonkey/SP Toon URP"
 {
     Properties
     {
@@ -6,6 +6,19 @@ Shader "DiGiMonkey/SP Toon URP"
         [Toggle] _UseHDR ("HDR Enabled", Float) = 0
         _HDRStrength ("HDR Ambient Strength", Range(0, 5)) = 0
         _LightPosition ("Light Position", Vector) = (10, 10, 10, 0)
+
+        [HideInInspector] [PerRendererData] _HullPaintData ("Hull Paint Vertex Data", 2D) = "white" {}
+        [HideInInspector] [PerRendererData] _HullPaintDataSize ("Hull Paint Data Size", Vector) = (1, 1, 0, 0)
+        [HideInInspector] [PerRendererData] _HullPaintEnabled ("Hull Paint Enabled", Float) = 0
+        [HideInInspector] [PerRendererData] _HullPaintReverse ("Hull Paint Reverse", Float) = 0
+        [HideInInspector] [PerRendererData] _HullPaintShow ("Hull Paint Show", Float) = 1
+        [HideInInspector] [PerRendererData] _HullPaintVertexCount ("Hull Paint Vertex Count", Float) = 0
+
+        [HideInInspector] _HullPlateEnabled ("Plate Outline Enabled", Float) = 0
+        [HideInInspector] _HullPlateDirections ("Plate Outline Directions", 2D) = "black" {}
+        [HideInInspector] _HullFaceOccluder ("Hull Face Occluder", Float) = 0
+        [HideInInspector] _HullHairMask ("Hull Hair Mask", Float) = 0
+        [HideInInspector] _HullOverHair ("Hull Over Hair", Float) = 0
 
         [Header(Hull Outline)]
         [Toggle] _UseHullOutline ("Use Hull Outline", Float) = 1
@@ -116,44 +129,18 @@ Shader "DiGiMonkey/SP Toon URP"
             "Queue" = "Transparent"
         }
 
-        // ──────────────────────────────────────────
-        //  Pass 0 : Hull Outline (Inverted Hull)
-        // ──────────────────────────────────────────
-        Pass
-        {
-            Name "HullOutline"
-            // No LightMode tag: URP renders this pass unconditionally
-
-            Cull Front
-            ZWrite [_SurfaceZWrite]
-            ZTest LEqual
-            Blend [_SurfaceSrcBlend] [_SurfaceDstBlend]
-
-            HLSLPROGRAM
-
-            #pragma target 3.5
-            #pragma vertex HullVert
-            #pragma fragment HullFrag
-
+        HLSLINCLUDE
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-
-            struct HullAttributes
-            {
-                float4 positionOS : POSITION;
-                float3 normalOS   : NORMAL;
-                float2 uv         : TEXCOORD0;
-            };
-
-            struct HullVaryings
-            {
-                float4 positionCS : SV_POSITION;
-                float2 uv         : TEXCOORD0;
-            };
-
-            TEXTURE2D(_HullOutlineMap);
-            SAMPLER(sampler_HullOutlineMap);
-
             CBUFFER_START(UnityPerMaterial)
+                float4 _HullPaintDataSize;
+                float _HullPlateEnabled;
+                float _HullHairMask;
+                float _HullFaceOccluder;
+                float _HullOverHair;
+                float _HullPaintEnabled;
+                float _HullPaintReverse;
+                float _HullPaintShow;
+                float _HullPaintVertexCount;
                 float4 _BaseMap_ST;
 
                 half4 _BaseColor;
@@ -223,6 +210,27 @@ Shader "DiGiMonkey/SP Toon URP"
                 half _SurfaceSrcBlend;
                 half _SurfaceDstBlend;
             CBUFFER_END
+            struct HullAttributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+                uint vertexID : SV_VertexID;
+                float2 uv         : TEXCOORD0;
+            };
+
+            struct HullVaryings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv         : TEXCOORD0;
+                float paintVisibility : TEXCOORD1;
+            };
+
+            TEXTURE2D(_HullPaintData);
+            TEXTURE2D(_HullPlateDirections);
+            TEXTURE2D(_HullOutlineMap);
+            SAMPLER(sampler_HullOutlineMap);
+
+
 
             // ── Value Noise (3D, world-space stable) ──
             float3 NoiseFloor(float3 v) { return floor(v); }
@@ -252,7 +260,7 @@ Shader "DiGiMonkey/SP Toon URP"
                     u.z);
             }
 
-            HullVaryings HullVert(HullAttributes input)
+            HullVaryings BuildHullVertex(HullAttributes input, bool plate)
             {
                 HullVaryings output;
 
@@ -263,9 +271,39 @@ Shader "DiGiMonkey/SP Toon URP"
 
                 float noise = ValueNoise3D(positionWS * _HullNoiseScale);
                 float width = _HullOutlineWidth * lerp(1.0, noise, _HullNoiseStrength);
+                output.paintVisibility = 1;
+                [branch] if (_HullPaintEnabled > 0.5)
+                {
+                    float4 paint = float4(1, 1, 0, 1);
+                    if (input.vertexID < (uint)_HullPaintVertexCount)
+                    {
+                        uint dataWidth = (uint)_HullPaintDataSize.x;
+                        paint = LOAD_TEXTURE2D(_HullPaintData, int2(input.vertexID % dataWidth, input.vertexID / dataWidth));
+                    }
+                    width *= paint.r;
+                    output.paintVisibility = paint.g * _HullPaintShow;
+                }
+                if (plate && input.vertexID < (uint)_HullPaintVertexCount)
+                {
+                    uint dataWidth = (uint)_HullPaintDataSize.x;
+                    float3 direction = LOAD_TEXTURE2D(_HullPlateDirections,
+                        int2(input.vertexID % dataWidth, input.vertexID / dataWidth)).rgb;
+                    normalWS = TransformObjectToWorldDir(direction, false);
+                    float directionLength = length(direction);
+                    normalWS = directionLength > 0.00001 ? normalize(normalWS) * directionLength : 0;
+                }
                 positionWS += normalWS * width;
 
                 output.positionCS = TransformWorldToHClip(positionWS);
+                if (plate)
+                {
+                    // The original front surface covers the interior of the expanded plate.
+                    #if UNITY_REVERSED_Z
+                        output.positionCS.z -= 0.000002 * output.positionCS.w;
+                    #else
+                        output.positionCS.z += 0.000002 * output.positionCS.w;
+                    #endif
+                }
 
                 // UseHullOutline OFF: widthを0にしてCull Frontで不可視化
                 // さらにpositionCSをNDC外に完全退避
@@ -280,8 +318,23 @@ Shader "DiGiMonkey/SP Toon URP"
                 return output;
             }
 
-            half4 HullFrag(HullVaryings input) : SV_Target
+            HullVaryings HullVert(HullAttributes input)
             {
+                return BuildHullVertex(input, _HullPlateEnabled > 0.5);
+            }
+
+            HullVaryings HullSilhouetteVert(HullAttributes input)
+            {
+                return BuildHullVertex(input, false);
+            }
+
+            half4 ShadeHull(HullVaryings input, bool front, bool plate)
+            {
+                bool reverse = _HullPaintEnabled > 0.5 && _HullPaintReverse > 0.5;
+                bool drawFront = plate != reverse;
+                if (drawFront ? !front : front) discard;
+                float threshold = frac(52.9829189 * frac(dot(floor(input.positionCS.xy), float2(.06711056, .00583715))));
+                clip(input.paintVisibility - max(.001, threshold));
                 half3 col =
                     SAMPLE_TEXTURE2D(
                         _HullOutlineMap,
@@ -293,6 +346,99 @@ Shader "DiGiMonkey/SP Toon URP"
                     ? saturate(_Opacity) : 1.0h;
                 return half4(col, hullAlpha);
             }
+
+
+            half4 HullFrag(HullVaryings input, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
+            {
+                if (_HullPlateEnabled > 0.5 && _HullHairMask > 0.5) discard;
+                return ShadeHull(input, IS_FRONT_VFACE(face, true, false), _HullPlateEnabled > 0.5);
+            }
+
+            half4 HullSilhouetteFrag(HullVaryings input, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
+            {
+                clip(_HullPlateEnabled - 0.5);
+                return ShadeHull(input, IS_FRONT_VFACE(face, true, false), false);
+            }
+
+            half4 HullHairBoundaryFrag(HullVaryings input, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
+            {
+                clip(min(_HullPlateEnabled, _HullHairMask) - 0.5);
+                return ShadeHull(input, IS_FRONT_VFACE(face, true, false), true);
+            }
+
+            TEXTURE2D(_OpacityMap); SAMPLER(sampler_OpacityMap);
+            HullVaryings HullMaskVert(HullAttributes input)
+            {
+                HullVaryings output;
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
+                output.paintVisibility = 1;
+                return output;
+            }
+            void ClipHullMask(HullVaryings input)
+            {
+                if (_AlphaClip < 0.5) return;
+                half opacity = SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, input.uv).r;
+                opacity = lerp(opacity, 1 - opacity, saturate(_InvertOpacity));
+                clip(opacity - _OpacityLevel);
+            }
+            half4 HullHairMaskFrag(HullVaryings input) : SV_Target
+            {
+                clip(_HullHairMask - 0.5);
+                ClipHullMask(input);
+                return 0;
+            }
+            float ClearHairDepthFrag(HullVaryings input) : SV_Depth
+            {
+                clip(_HullHairMask - 0.5);
+                ClipHullMask(input);
+                #if UNITY_REVERSED_Z
+                    return 0;
+                #else
+                    return 1;
+                #endif
+            }
+
+            half4 FaceOccluderDepthFrag(HullVaryings input) : SV_Target
+            {
+                clip(_HullFaceOccluder - 0.5);
+                ClipHullMask(input);
+                return 0;
+            }
+
+            half4 HullBrowMaskFrag(HullVaryings input) : SV_Target
+            {
+                clip(_HullOverHair - 0.5);
+                ClipHullMask(input);
+                return 0;
+            }
+            half4 HullOverHairFrag(HullVaryings input, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
+            {
+                clip(_HullOverHair - 0.5);
+                return HullFrag(input, face);
+            }
+        ENDHLSL
+
+        // ──────────────────────────────────────────
+        //  Pass 0 : Hull Outline (Inverted Hull)
+        // ──────────────────────────────────────────
+        Pass
+        {
+            Name "HullOutline"
+            // No LightMode tag: URP renders this pass unconditionally
+
+            Cull Off // Face selection occurs in HullFrag for per-renderer paint preview.
+            ZWrite [_SurfaceZWrite]
+            ZTest LEqual
+            Blend [_SurfaceSrcBlend] [_SurfaceDstBlend]
+
+            HLSLPROGRAM
+
+            #pragma target 3.5
+            #pragma vertex HullVert
+            #pragma fragment HullFrag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             ENDHLSL
         }
@@ -360,78 +506,9 @@ Shader "DiGiMonkey/SP Toon URP"
             TEXTURE2D(_ToonMap6);       SAMPLER(sampler_ToonMap6);
             TEXTURE2D(_ToonMap7);       SAMPLER(sampler_ToonMap7);
 
-            CBUFFER_START(UnityPerMaterial)
-                float4 _BaseMap_ST;
 
-                half4 _BaseColor;
-                half4 _OutlineColor;
-                half4 _InlineColor;
-                half4 _ToonColor2;
-                half4 _ToonColor3;
-                half4 _ToonColor4;
-                half4 _ToonColor5;
-                half4 _ToonColor6;
-                half4 _ToonColor7;
-                half4 _AOColor;
-                half4 _RimColor;
-                half4 _ThicknessColor;
-                half4 _HullOutlineColor;
 
-                float4 _LightPosition;
 
-                half _UseHDR;
-                half _HDRStrength;
-
-                half _UseHullOutline;
-                half _HullOutlineWidth;
-                half _HullNoiseStrength;
-                half _HullNoiseScale;
-
-                half _UseOutline;
-                half _ReverseOutline;
-                half _OutlineThickness;
-                half _OutlineBlur;
-
-                half _InlineThickness;
-                half _InlineBlur;
-                half _InlineOnTop;
-                half _InvertCurvature;
-
-                half _ToonParam2;
-                half _ToonParam3;
-                half _ToonParam4;
-                half _ToonParam5;
-                half _ToonParam6;
-                half _ToonParam7;
-                half _ToonBlur;
-
-                half _NormalStrength;
-
-                half _AOStrength;
-
-                half _UseRim;
-                half _RimStrength;
-                half _RimSharpness;
-
-                half _UseThickness;
-                half _ThicknessStrength;
-
-                half _UseMatCap;
-                half _MatCapStrength;
-                half _MatCapBlend;
-
-                half _AlphaClip;
-                half _OpacityLevel;
-                half _Opacity;
-                half _InvertOpacity;
-                half _SurfaceMode;
-                half _SurfaceCull;
-                half _SurfaceZWrite;
-                half _SurfaceSrcBlend;
-                half _SurfaceDstBlend;
-            CBUFFER_END
-
-            TEXTURE2D(_OpacityMap); SAMPLER(sampler_OpacityMap);
 
             Varyings Vert(Attributes input)
             {
@@ -765,78 +842,9 @@ Shader "DiGiMonkey/SP Toon URP"
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
 
-            CBUFFER_START(UnityPerMaterial)
-                float4 _BaseMap_ST;
 
-                half4 _BaseColor;
-                half4 _OutlineColor;
-                half4 _InlineColor;
-                half4 _ToonColor2;
-                half4 _ToonColor3;
-                half4 _ToonColor4;
-                half4 _ToonColor5;
-                half4 _ToonColor6;
-                half4 _ToonColor7;
-                half4 _AOColor;
-                half4 _RimColor;
-                half4 _ThicknessColor;
-                half4 _HullOutlineColor;
 
-                float4 _LightPosition;
 
-                half _UseHDR;
-                half _HDRStrength;
-
-                half _UseHullOutline;
-                half _HullOutlineWidth;
-                half _HullNoiseStrength;
-                half _HullNoiseScale;
-
-                half _UseOutline;
-                half _ReverseOutline;
-                half _OutlineThickness;
-                half _OutlineBlur;
-
-                half _InlineThickness;
-                half _InlineBlur;
-                half _InlineOnTop;
-                half _InvertCurvature;
-
-                half _ToonParam2;
-                half _ToonParam3;
-                half _ToonParam4;
-                half _ToonParam5;
-                half _ToonParam6;
-                half _ToonParam7;
-                half _ToonBlur;
-
-                half _NormalStrength;
-
-                half _AOStrength;
-
-                half _UseRim;
-                half _RimStrength;
-                half _RimSharpness;
-
-                half _UseThickness;
-                half _ThicknessStrength;
-
-                half _UseMatCap;
-                half _MatCapStrength;
-                half _MatCapBlend;
-
-                half _AlphaClip;
-                half _OpacityLevel;
-                half _Opacity;
-                half _InvertOpacity;
-                half _SurfaceMode;
-                half _SurfaceCull;
-                half _SurfaceZWrite;
-                half _SurfaceSrcBlend;
-                half _SurfaceDstBlend;
-            CBUFFER_END
-
-            TEXTURE2D(_OpacityMap); SAMPLER(sampler_OpacityMap);
 
             float4 GetShadowPositionHClip(ShadowAttributes input)
             {
@@ -878,6 +886,137 @@ Shader "DiGiMonkey/SP Toon URP"
                 return 0;
             }
 
+            ENDHLSL
+        }
+
+        // These passes are scheduled by URP Render Objects after opaque rendering.
+        Pass
+        {
+            Name "SPToonHairMask"
+            Tags { "LightMode" = "SPToonHairMask" }
+            Cull [_SurfaceCull]
+            ZTest Equal
+            ZWrite Off
+            ColorMask 0
+            Stencil { Ref 4 WriteMask 4 Comp Always Pass Replace }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullMaskVert
+            #pragma fragment HullHairMaskFrag
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "SPToonBrowInterior"
+            Tags { "LightMode" = "SPToonBrowInterior" }
+            Cull [_SurfaceCull]
+            ZTest Always
+            ZWrite Off
+            ColorMask 0
+            Stencil { Ref 8 WriteMask 8 Comp Always Pass Replace }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullMaskVert
+            #pragma fragment HullBrowMaskFrag
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "SPToonOverHair"
+            Tags { "LightMode" = "SPToonOverHair" }
+            Cull Off
+            ZTest LEqual
+            ZWrite Off
+            Blend SrcAlpha OneMinusSrcAlpha
+            Stencil { Ref 4 ReadMask 12 Comp Equal Pass Keep }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullVert
+            #pragma fragment HullOverHairFrag
+            ENDHLSL
+        }
+
+        // Curved open meshes need a silhouette as well as their explicit boundary edges.
+        Pass
+        {
+            Name "SPToonPlateSilhouette"
+            Tags { "LightMode" = "SPToonPlateSilhouette" }
+            Cull Off
+            ZTest LEqual
+            ZWrite Off
+            Blend [_SurfaceSrcBlend] [_SurfaceDstBlend]
+            Stencil { Ref 0 ReadMask 4 Comp Equal Pass Keep }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullSilhouetteVert
+            #pragma fragment HullSilhouetteFrag
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "SPToonHairBoundary"
+            Tags { "LightMode" = "SPToonHairBoundary" }
+            Cull Off
+            ZTest LEqual
+            ZWrite Off
+            Blend [_SurfaceSrcBlend] [_SurfaceDstBlend]
+            Stencil { Ref 0 ReadMask 4 Comp Equal Pass Keep }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullVert
+            #pragma fragment HullHairBoundaryFrag
+            ENDHLSL
+        }
+
+        // Rebuild depth inside the visible hair mask for the eyebrow pass.
+        // Redraw the nearest hair depth before any later scene passes.
+
+        Pass
+        {
+            Name "SPToonClearHairDepth"
+            Tags { "LightMode" = "SPToonClearHairDepth" }
+            Cull [_SurfaceCull]
+            ZTest Always
+            ZWrite On
+            ColorMask 0
+            Stencil { Ref 4 ReadMask 4 Comp Equal Pass Keep }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullMaskVert
+            #pragma fragment ClearHairDepthFrag
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "SPToonFaceOccluderDepth"
+            Tags { "LightMode" = "SPToonFaceOccluderDepth" }
+            Cull [_SurfaceCull]
+            ZTest LEqual
+            ZWrite On
+            ColorMask 0
+            Stencil { Ref 4 ReadMask 4 Comp Equal Pass Keep }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullMaskVert
+            #pragma fragment FaceOccluderDepthFrag
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "SPToonRestoreHairDepth"
+            Tags { "LightMode" = "SPToonRestoreHairDepth" }
+            Cull [_SurfaceCull]
+            ZTest LEqual
+            ZWrite On
+            ColorMask 0
+            Stencil { Ref 4 ReadMask 4 Comp Equal Pass Keep }
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex HullMaskVert
+            #pragma fragment HullHairMaskFrag
             ENDHLSL
         }
     }

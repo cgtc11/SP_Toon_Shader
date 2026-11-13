@@ -762,9 +762,9 @@ namespace DiGiMonkey
                 if (!skin) skin = GetSampleMaterial(sampleAssets, shader, "Face",
                     new Color(1f, .94f, .70f), .022f);
                 if (!hair) hair = GetSampleMaterial(sampleAssets, shader, "Hair",
-                    new Color(.52f, .44f, .44f), .014f);
+                    new Color(.52f, .44f, .44f), .014f, true);
                 if (!brow) brow = GetSampleMaterial(sampleAssets, shader, "Eyebrows",
-                    new Color(.36f, .48f, .31f), .009f);
+                    new Color(.36f, .48f, .31f), .009f, true);
                 if (!skin || !hair || !brow) return;
             }
 
@@ -814,7 +814,7 @@ namespace DiGiMonkey
             Selection.activeGameObject = sample;
         }
 
-        static Material GetSampleMaterial(string folder, Shader shader, string name, Color color, float width)
+        static Material GetSampleMaterial(string folder, Shader shader, string name, Color color, float width, bool bothSides = false)
         {
             string path = folder + "/" + name + ".mat";
             var asset = AssetDatabase.LoadMainAssetAtPath(path);
@@ -830,9 +830,11 @@ namespace DiGiMonkey
                         usesGrayPalette &= Mathf.Abs(shade.r - shade.g) < .001f &&
                             Mathf.Abs(shade.r - shade.b) < .001f;
                     }
-                    if (usesGrayPalette)
+                    bool migrateSurface = bothSides && existing.GetFloat("_SurfaceMode") == 0;
+                    if (usesGrayPalette || migrateSurface)
                     {
-                        ApplySamplePalette(existing, existing.GetColor("_BaseColor"));
+                        if (usesGrayPalette) ApplySamplePalette(existing, existing.GetColor("_BaseColor"));
+                        if (migrateSurface) SetSamplePlateSurface(existing);
                         EditorUtility.SetDirty(existing);
                         AssetDatabase.SaveAssetIfDirty(existing);
                     }
@@ -845,8 +847,21 @@ namespace DiGiMonkey
             var material = new Material(shader) { name = name, renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry };
             ApplySamplePalette(material, color);
             material.SetFloat("_HullOutlineWidth", width);
+            if (bothSides) SetSamplePlateSurface(material);
             AssetDatabase.CreateAsset(material, path);
             return material;
+        }
+
+        static void SetSamplePlateSurface(Material material)
+        {
+            material.SetFloat("_SurfaceMode", 3);
+            material.SetFloat("_SurfaceCull", 0);
+            material.SetFloat("_AlphaClip", 1);
+            material.SetFloat("_OpacityLevel", .5f);
+            material.SetFloat("_SurfaceZWrite", 1);
+            material.SetFloat("_SurfaceSrcBlend", 1);
+            material.SetFloat("_SurfaceDstBlend", 0);
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
         }
 
         static void ApplySamplePalette(Material material, Color color)
@@ -951,8 +966,8 @@ namespace DiGiMonkey
                 var filters = settings.FindPropertyRelative("filterSettings");
                 config.FindProperty("m_Active").boolValue = true;
                 settings.FindPropertyRelative("passTag").stringValue = tag;
-                // Unique events keep the depth and stencil passes ordered on every renderer.
-                settings.FindPropertyRelative("Event").intValue = 300 + index;
+                // Draw color-only outlines after the skybox, before transparent objects.
+                settings.FindPropertyRelative("Event").intValue = 400 + index;
                 settings.FindPropertyRelative("overrideMode").intValue = 0;
                 settings.FindPropertyRelative("overrideDepthState").boolValue = false;
                 filters.FindPropertyRelative("RenderQueueType").intValue = 0;
@@ -1453,6 +1468,12 @@ namespace DiGiMonkey
                         if (visibility[a] <= .001f && visibility[b] <= .001f && visibility[c] <= .001f) continue;
                         bool drawFront = usePlate != painter.reverseFaces;
                         triangles.Add(a); triangles.Add(drawFront ? b : c); triangles.Add(drawFront ? c : b);
+                        if (usePlate && HullProperty(material, "_SurfaceCull", slot) == 0)
+                        {
+                            triangles.Add(a);
+                            triangles.Add(drawFront ? c : b);
+                            triangles.Add(drawFront ? b : c);
+                        }
                     }
                 }
             }

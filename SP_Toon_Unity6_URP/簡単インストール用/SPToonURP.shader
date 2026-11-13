@@ -334,7 +334,7 @@
             {
                 bool reverse = _HullPaintEnabled > 0.5 && _HullPaintReverse > 0.5;
                 bool drawFront = plate != reverse;
-                if (drawFront ? !front : front) discard;
+                if (!(plate && _SurfaceCull == 0) && (drawFront ? !front : front)) discard;
                 float threshold = frac(52.9829189 * frac(dot(floor(input.positionCS.xy), float2(.06711056, .00583715))));
                 clip(input.paintVisibility - max(.001, threshold));
                 half3 col =
@@ -352,7 +352,7 @@
 
             half4 HullFrag(HullVaryings input, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
             {
-                if (_HullPlateEnabled > 0.5 && _HullHairMask > 0.5) discard;
+                if (_HullPlateEnabled > 0.5 && _HullCurvedPlate > 0.5 && _HullHairMask > 0.5) discard;
                 return ShadeHull(input, IS_FRONT_VFACE(face, true, false), _HullPlateEnabled > 0.5);
             }
 
@@ -364,7 +364,7 @@
 
             half4 HullHairBoundaryFrag(HullVaryings input, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
             {
-                clip(min(_HullPlateEnabled, _HullHairMask) - 0.5);
+                clip(min(min(_HullPlateEnabled, _HullCurvedPlate), _HullHairMask) - 0.5);
                 return ShadeHull(input, IS_FRONT_VFACE(face, true, false), true);
             }
 
@@ -372,7 +372,7 @@
             HullVaryings HullMaskVert(HullAttributes input)
             {
                 HullVaryings output;
-                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.positionCS = GetVertexPositionInputs(input.positionOS.xyz).positionCS;
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
                 output.paintVisibility = 1;
                 return output;
